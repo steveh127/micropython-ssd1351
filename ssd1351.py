@@ -1,12 +1,20 @@
-"""SSD1351 OLED module."""
+"""SSD1351 OLED module.h 
+
+ SH 
+ 
+ remove circuit python code
+ class renamed to SSD1351
+ classes created to:
+	manipulate text
+	draw lines
+	
+"""
 from time import sleep
 from math import cos, sin, pi, radians
-from sys import implementation
-
+from micropython import const 
 
 def color565(r, g, b):
     """Return RGB565 color value.
-
     Args:
         r (int): Red value.
         g (int): Green value.
@@ -15,9 +23,8 @@ def color565(r, g, b):
     return (r & 0xf8) << 8 | (g & 0xfc) << 3 | b >> 3
 
 
-class Display(object):
+class SSD1351(object):
     """Serial interface for 16-bit color (5-6-5 RGB) SSD1351 OLED display.
-
     Note:  All coordinates are zero based.
     """
 
@@ -56,7 +63,6 @@ class Display(object):
 
     def __init__(self, spi, cs, dc, rst, width=128, height=128):
         """Initialize OLED.
-
         Args:
             spi (Class Spi):  SPI interface for OLED
             cs (Class Pin):  Chip select pin
@@ -71,21 +77,12 @@ class Display(object):
         self.rst = rst
         self.width = width
         self.height = height
-        # Initialize GPIO pins and set implementation specific methods
-        if implementation.name == 'circuitpython':
-            self.cs.switch_to_output(value=True)
-            self.dc.switch_to_output(value=False)
-            self.rst.switch_to_output(value=True)
-            self.reset = self.reset_cpy
-            self.write_cmd = self.write_cmd_cpy
-            self.write_data = self.write_data_cpy
-        else:
-            self.cs.init(self.cs.OUT, value=1)
-            self.dc.init(self.dc.OUT, value=0)
-            self.rst.init(self.rst.OUT, value=1)
-            self.reset = self.reset_mpy
-            self.write_cmd = self.write_cmd_mpy
-            self.write_data = self.write_data_mpy
+        self.cs.init(self.cs.OUT, value=1)
+        self.dc.init(self.dc.OUT, value=0)
+        self.rst.init(self.rst.OUT, value=1)
+        self.reset = self.reset
+        self.write_cmd = self.write_cmd
+        self.write_data = self.write_data
         self.reset()
         # Send initialization commands
         self.write_cmd(self.COMMAND_LOCK, 0x12)  # Unlock IC MCU interface
@@ -112,7 +109,6 @@ class Display(object):
 
     def block(self, x0, y0, x1, y1, data):
         """Write a block of data to display.
-
         Args:
             x0 (int):  Starting X position.
             y0 (int):  Starting Y position.
@@ -134,7 +130,6 @@ class Display(object):
 
     def clear(self, color=0):
         """Clear display.
-
         Args:
             color (Optional int): RGB565 color value (Default: 0 = Black).
         """
@@ -150,7 +145,6 @@ class Display(object):
 
     def contrast(self, level):
         """Set display contrast to specified level.
-
         Args:
             level (int): Contrast level (0 - 15).
         Note:
@@ -166,10 +160,11 @@ class Display(object):
     def display_on(self):
         """Turn display on."""
         self.write_cmd(self.DISPLAY_ON)
+        
+        
 
     def draw_circle(self, x0, y0, r, color):
         """Draw a circle.
-
         Args:
             x0 (int): X coordinate of center point.
             y0 (int): Y coordinate of center point.
@@ -204,7 +199,6 @@ class Display(object):
 
     def draw_ellipse(self, x0, y0, a, b, color):
         """Draw an ellipse.
-
         Args:
             x0, y0 (int): Coordinates of center point.
             a (int): Semi axis horizontal.
@@ -261,23 +255,8 @@ class Display(object):
             self.draw_pixel(x0 + x, y0 - y, color)
             self.draw_pixel(x0 - x, y0 - y, color)
 
-    def draw_hline(self, x, y, w, color):
-        """Draw a horizontal line.
-
-        Args:
-            x (int): Starting X position.
-            y (int): Starting Y position.
-            w (int): Width of line.
-            color (int): RGB565 color value.
-        """
-        if self.is_off_grid(x, y, x + w - 1, y):
-            return
-        line = color.to_bytes(2, 'big') * w
-        self.block(x, y, x + w - 1, y, line)
-
     def draw_image(self, path, x=0, y=0, w=128, h=128):
         """Draw image from flash.
-
         Args:
             path (string): Image file path.
             x (int): X coordinate of image left.  Default is 0.
@@ -307,115 +286,8 @@ class Display(object):
                            x2, chunk_y + remainder - 1,
                            buf)
 
-    def draw_letter(self, x, y, letter, font, color, background=0,
-                    landscape=False):
-        """Draw a letter.
-
-        Args:
-            x (int): Starting X position.
-            y (int): Starting Y position.
-            letter (string): Letter to draw.
-            font (XglcdFont object): Font.
-            color (int): RGB565 color value.
-            background (int): RGB565 background color (default: black).
-            landscape (bool): Orientation (default: False = portrait)
-        """
-        buf, w, h = font.get_letter(letter, color, background,
-                                    landscape)
-        # Check for errors
-        if w == 0:
-            return w, h
-
-        if landscape:
-            y -= w
-            if self.is_off_grid(x, y, x + h - 1, y + w - 1):
-                return
-            self.block(x, y,
-                       x + h - 1, y + w - 1,
-                       buf)
-        else:
-            if self.is_off_grid(x, y, x + w - 1, y + h - 1):
-                return
-            self.write_cmd(self.SET_REMAP, 0x75)  # Vertical address increment
-            self.block(x, y,
-                       x + w - 1, y + h - 1,
-                       buf)
-            self.write_cmd(self.SET_REMAP, 0x74)  # Switch back to horizontal
-        return w, h
-
-    def draw_line(self, x1, y1, x2, y2, color):
-        """Draw a line using Bresenham's algorithm.
-
-        Args:
-            x1, y1 (int): Starting coordinates of the line
-            x2, y2 (int): Ending coordinates of the line
-            color (int): RGB565 color value.
-        """
-        # Check for horizontal line
-        if y1 == y2:
-            if x1 > x2:
-                x1, x2 = x2, x1
-            self.draw_hline(x1, y1, x2 - x1 + 1, color)
-            return
-        # Check for vertical line
-        if x1 == x2:
-            if y1 > y2:
-                y1, y2 = y2, y1
-            self.draw_vline(x1, y1, y2 - y1 + 1, color)
-            return
-        # Confirm coordinates in boundary
-        if self.is_off_grid(min(x1, x2), min(y1, y2),
-                            max(x1, x2), max(y1, y2)):
-            return
-        # Changes in x, y
-        dx = x2 - x1
-        dy = y2 - y1
-        # Determine how steep the line is
-        is_steep = abs(dy) > abs(dx)
-        # Rotate line
-        if is_steep:
-            x1, y1 = y1, x1
-            x2, y2 = y2, x2
-        # Swap start and end points if necessary
-        if x1 > x2:
-            x1, x2 = x2, x1
-            y1, y2 = y2, y1
-        # Recalculate differentials
-        dx = x2 - x1
-        dy = y2 - y1
-        # Calculate error
-        error = dx >> 1
-        ystep = 1 if y1 < y2 else -1
-        y = y1
-        for x in range(x1, x2 + 1):
-            # Had to reverse HW ????
-            if not is_steep:
-                self.draw_pixel(x, y, color)
-            else:
-                self.draw_pixel(y, x, color)
-            error -= abs(dy)
-            if error < 0:
-                y += ystep
-                error += dx
-
-    def draw_lines(self, coords, color):
-        """Draw multiple lines.
-
-        Args:
-            coords ([[int, int],...]): Line coordinate X, Y pairs
-            color (int): RGB565 color value.
-        """
-        # Starting point
-        x1, y1 = coords[0]
-        # Iterate through coordinates
-        for i in range(1, len(coords)):
-            x2, y2 = coords[i]
-            self.draw_line(x1, y1, x2, y2, color)
-            x1, y1 = x2, y2
-
     def draw_pixel(self, x, y, color):
         """Draw a single pixel.
-
         Args:
             x (int): X position.
             y (int): Y position.
@@ -427,7 +299,6 @@ class Display(object):
 
     def draw_polygon(self, sides, x0, y0, r, color, rotate=0):
         """Draw an n-sided regular polygon.
-
         Args:
             sides (int): Number of polygon sides.
             x0, y0 (int): Coordinates of center point.
@@ -451,7 +322,6 @@ class Display(object):
 
     def draw_rectangle(self, x, y, w, h, color):
         """Draw a rectangle.
-
         Args:
             x (int): Starting X position.
             y (int): Starting Y position.
@@ -468,7 +338,6 @@ class Display(object):
 
     def draw_sprite(self, buf, x, y, w, h):
         """Draw a sprite (optimized for horizontal drawing).
-
         Args:
             buf (bytearray): Buffer to draw.
             x (int): Starting X position.
@@ -482,60 +351,8 @@ class Display(object):
             return
         self.block(x, y, x2, y2, buf)
 
-    def draw_text(self, x, y, text, font, color,  background=0,
-                  landscape=False, spacing=1):
-        """Draw text.
-
-        Args:
-            x (int): Starting X position.
-            y (int): Starting Y position.
-            text (string): Text to draw.
-            font (XglcdFont object): Font.
-            color (int): RGB565 color value.
-            background (int): RGB565 background color (default: black).
-            landscape (bool): Orientation (default: False = portrait)
-            spacing (int): Pixels between letters (default: 1)
-        """
-        for letter in text:
-            # Get letter array and letter dimensions
-            w, h = self.draw_letter(x, y, letter, font, color, background,
-                                    landscape)
-            # Stop on error
-            if w == 0 or h == 0:
-                print('Invalid width {0} or height {1}'.format(w, h))
-                return
-
-            if landscape:
-                # Fill in spacing
-                if spacing:
-                    self.fill_hrect(x, y - w - spacing, h, spacing, background)
-                # Position y for next letter
-                y -= (w + spacing)
-            else:
-                # Fill in spacing
-                if spacing:
-                    self.fill_vrect(x + w, y, spacing, h, background)
-                # Position x for next letter
-                x += w + spacing
-
-    def draw_vline(self, x, y, h, color):
-        """Draw a vertical line.
-
-        Args:
-            x (int): Starting X position.
-            y (int): Starting Y position.
-            h (int): Height of line.
-            color (int): RGB565 color value.
-        """
-        # Confirm coordinates in boundary
-        if self.is_off_grid(x, y, x, y + h):
-            return
-        line = color.to_bytes(2, 'big') * h
-        self.block(x, y, x, y + h - 1, line)
-
     def fill_circle(self, x0, y0, r, color):
         """Draw a filled circle.
-
         Args:
             x0 (int): X coordinate of center point.
             y0 (int): Y coordinate of center point.
@@ -563,7 +380,6 @@ class Display(object):
 
     def fill_ellipse(self, x0, y0, a, b, color):
         """Draw a filled ellipse.
-
         Args:
             x0, y0 (int): Coordinates of center point.
             a (int): Semi axis horizontal.
@@ -615,7 +431,6 @@ class Display(object):
 
     def fill_hrect(self, x, y, w, h, color):
         """Draw a filled rectangle (optimized for horizontal drawing).
-
         Args:
             x (int): Starting X position.
             y (int): Starting Y position.
@@ -645,7 +460,6 @@ class Display(object):
 
     def fill_rectangle(self, x, y, w, h, color):
         """Draw a filled rectangle.
-
         Args:
             x (int): Starting X position.
             y (int): Starting Y position.
@@ -662,7 +476,6 @@ class Display(object):
 
     def fill_polygon(self, sides, x0, y0, r, color, rotate=0):
         """Draw a filled n-sided regular polygon.
-
         Args:
             sides (int): Number of polygon sides.
             x0, y0 (int): Coordinates of center point.
@@ -744,7 +557,6 @@ class Display(object):
 
     def fill_vrect(self, x, y, w, h, color):
         """Draw a filled rectangle (optimized for vertical drawing).
-
         Args:
             x (int): Starting X position.
             y (int): Starting Y position.
@@ -774,7 +586,6 @@ class Display(object):
 
     def is_off_grid(self, xmin, ymin, xmax, ymax):
         """Check if coordinates extend past display boundaries.
-
         Args:
             xmin (int): Minimum horizontal pixel.
             ymin (int): Minimum vertical pixel.
@@ -801,7 +612,6 @@ class Display(object):
 
     def load_sprite(self, path, w, h):
         """Load sprite image.
-
         Args:
             path (string): Image file path.
             w (int): Width of image.
@@ -813,16 +623,7 @@ class Display(object):
         with open(path, "rb") as f:
             return f.read(buf_size)
 
-    def reset_cpy(self):
-        """Perform reset: Low=initialization, High=normal operation.
-        Notes: CircuitPython implemntation
-        """
-        self.rst.value = False
-        sleep(.05)
-        self.rst.value = True
-        sleep(.05)
-
-    def reset_mpy(self):
+    def reset(self):
         """Perform reset: Low=initialization, High=normal operation.
         Notes: MicroPython implemntation
         """
@@ -833,7 +634,6 @@ class Display(object):
 
     def scroll(self, enable=True):
         """Enable or disable scrolling.
-
         Args:
             enable (bool): Default True
         Notes:
@@ -847,7 +647,6 @@ class Display(object):
     def set_scroll(self, horiz_offset, vert_start_row, vert_row_count,
                    vert_offset, speed):
         """Define scrolling area.
-
         Args:
             horiz_offset (byte): 0=None, 1-63=Left, 64-255=Right
             vert_start_row (byte): First veritcal row to scroll
@@ -867,9 +666,8 @@ class Display(object):
         self.write_cmd(self.HORIZ_SCROLL, horiz_offset, vert_start_row,
                        vert_row_count, vert_offset, speed)
 
-    def write_cmd_mpy(self, command, *args):
+    def write_cmd(self, command, *args):
         """Write command to OLED (MicroPython).
-
         Args:
             command (byte): SSD1351 command code.
             *args (optional bytes): Data to transmit.
@@ -882,28 +680,8 @@ class Display(object):
         if len(args) > 0:
             self.write_data(bytearray(args))
 
-    def write_cmd_cpy(self, command, *args):
-        """Write command to OLED (CircuitPython).
-
-        Args:
-            command (byte): SSD1351 command code.
-            *args (optional bytes): Data to transmit.
-        """
-        self.dc.value = False
-        self.cs.value = False
-        # Confirm SPI locked before writing
-        while not self.spi.try_lock():
-            pass
-        self.spi.write(bytearray([command]))
-        self.spi.unlock()
-        self.cs.value = True
-        # Handle any passed data
-        if len(args) > 0:
-            self.write_data(bytearray(args))
-
-    def write_data_mpy(self, data):
+    def write_data(self, data):
         """Write data to OLED (MicroPython).
-
         Args:
             data (bytes): Data to transmit.
         """
@@ -912,17 +690,3 @@ class Display(object):
         self.spi.write(data)
         self.cs(1)
 
-    def write_data_cpy(self, data):
-        """Write data to OLED (CircuitPython).
-
-        Args:
-            data (bytes): Data to transmit.
-        """
-        self.dc.value = True
-        self.cs.value = False
-        # Confirm SPI locked before writing
-        while not self.spi.try_lock():
-            pass
-        self.spi.write(data)
-        self.spi.unlock()
-        self.cs.value = True
